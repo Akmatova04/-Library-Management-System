@@ -1,0 +1,185 @@
+{% extends "api/base.html" %}
+{% load static %}
+
+{% block title %}Карыз Алуучулар{% endblock %}
+
+{% block content %}
+<h2>Карыз Алуучулардын Тизмеси</h2>
+
+<div class="form-group">
+    <label for="borrowerSearchInput">Издөө (аты-жөнү, ID):</label>
+    <input type="text" id="borrowerSearchInput" placeholder="Издөө...">
+</div>
+{# Бул жерге "Жаңы карыз алуучу кошуу" баскычын/шилтемесин кошсоңуз болот, эгер ал үчүн өзүнчө барак же модалдык терезе болсо #}
+{# Мисалы: <a href="{% url 'page_add_borrower' %}" class="btn" style="margin-bottom: 15px;">Жаңы Карыз Алуучу Кошуу</a> #}
+
+
+<div id="loadingBorrowersMessage">Маалыматтар жүктөлүүдө...</div>
+<div id="errorBorrowersMessage" style="display:none;"></div>
+<ul id="borrowerListUL" class="book-list"> {# Окшош стиль үчүн book-list классын колдонобуз #}
+    <!-- Карыз алуучулар бул жерге JavaScript аркылуу жайгаштырылат -->
+</ul>
+<div id="borrowerPaginationControls" style="text-align: center; margin-top: 20px;">
+    <!-- Пагинация баскычтары -->
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Бул функцияны глобалдык scope'ко чыгарабыз
+window.fetchBorrowersGlobal = function() {
+    const borrowerListULElement = document.getElementById('borrowerListUL');
+    const loadingMsgElement = document.getElementById('loadingBorrowersMessage');
+    const errorMsgElement = document.getElementById('errorBorrowersMessage');
+    const searchInputElement = document.getElementById('borrowerSearchInput');
+    const paginationCtrlElement = document.getElementById('borrowerPaginationControls');
+
+    let currentPage = parseInt(paginationCtrlElement.dataset.currentPage) || 1;
+    let currentSearchQuery = searchInputElement ? searchInputElement.value : '';
+
+    loadingMsgElement.style.display = 'block';
+    borrowerListULElement.innerHTML = ''; // Эски тизмени тазалоо
+    errorMsgElement.style.display = 'none';
+
+    let apiUrl = `/api-v1/borrowers/?page=${currentPage}`; // API endpoint'иңизди текшериңиз
+    if (currentSearchQuery) {
+        apiUrl += `&search=${encodeURIComponent(currentSearchQuery)}`;
+    }
+
+    fetch(apiUrl)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            displayBorrowers(data, borrowerListULElement, loadingMsgElement, errorMsgElement, paginationCtrlElement, currentPage);
+        })
+        .catch(error => {
+            console.error('Error fetching borrowers:', error);
+            loadingMsgElement.style.display = 'none';
+            errorMsgElement.textContent = 'Карыз алуучуларды жүктөөдө ката кетти: ' + error.message;
+            errorMsgElement.style.display = 'block';
+        });
+}
+
+function displayBorrowers(borrowersData, listUlElem, loadingElem, errorElem, paginationElem, currentPageNum) {
+    loadingElem.style.display = 'none';
+    listUlElem.innerHTML = ''; // Кайра тазалоо (коопсуздук үчүн)
+    errorElem.style.display = 'none';
+
+    if (!borrowersData || !borrowersData.results || borrowersData.results.length === 0) {
+        listUlElem.innerHTML = '<li>Карыз алуучулар табылган жок.</li>';
+        paginationElem.innerHTML = '';
+        return;
+    }
+
+    borrowersData.results.forEach(borrower => {
+        const li = document.createElement('li');
+        li.classList.add('book-item'); // Китептердин стилине окшоштуруу үчүн
+        li.innerHTML = `
+            <div class="book-details"> {# class атын дагы book-details калтырдым, стилдер бирдей болуш үчүн #}
+                <div class="title">${borrower.name}</div>
+                <div class="author">ID: ${borrower.user_id}</div> {# author классы стил үчүн #}
+                <div class="isbn">Тиби: ${borrower.user_type_display || borrower.user_type}</div> {# isbn классы стил үчүн #}
+                <div style="margin-top: 10px;">
+                    {# Оңдоо жана өчүрүү үчүн шилтемелер/баскычтар. URL'дерди жана функцияларды түзүү керек. #}
+                    {# <a href="/app/borrowers/edit/${borrower.id}/" class="btn btn-edit">Оңдоо</a> #}
+                    {# <button class="btn btn-danger" onclick="deleteBorrower(${borrower.id}, '${borrower.name.replace(/'/g, "\\'")}')">Өчүрүү</button> #}
+                </div>
+            </div>
+        `;
+        listUlElem.appendChild(li);
+    });
+    
+    renderBorrowerPagination(borrowersData.count, borrowersData.next, borrowersData.previous, paginationElem, currentPageNum);
+}
+
+function renderBorrowerPagination(totalItems, nextPageUrl, prevPageUrl, paginationElem, currentPageNum) {
+    paginationElem.innerHTML = '';
+    paginationElem.dataset.currentPage = currentPageNum;
+
+    const itemsPerPage = 10; // Сиздин DRF PAGE_SIZE менен бирдей болушу керек
+    const totalPages = Math.ceil(totalItems / itemsPerPage);
+
+    if (totalPages <= 1) return;
+
+    if (prevPageUrl) {
+        const prevButton = document.createElement('button');
+        prevButton.textContent = '<< Мурунку';
+        prevButton.classList.add('btn');
+        prevButton.addEventListener('click', () => {
+            paginationElem.dataset.currentPage = parseInt(currentPageNum) - 1;
+            window.fetchBorrowersGlobal();
+        });
+        paginationElem.appendChild(prevButton);
+    }
+    
+    const pageInfo = document.createElement('span');
+    pageInfo.textContent = ` Бет ${currentPageNum} / ${totalPages} `;
+    pageInfo.style.margin = "0 10px";
+    paginationElem.appendChild(pageInfo);
+
+    if (nextPageUrl) {
+        const nextButton = document.createElement('button');
+        nextButton.textContent = 'Кийинки >>';
+        nextButton.classList.add('btn');
+        nextButton.addEventListener('click', () => {
+            paginationElem.dataset.currentPage = parseInt(currentPageNum) + 1;
+            window.fetchBorrowersGlobal();
+        });
+        paginationElem.appendChild(nextButton);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInputElement = document.getElementById('borrowerSearchInput');
+    const paginationCtrlElement = document.getElementById('borrowerPaginationControls');
+
+    if (searchInputElement) {
+        searchInputElement.addEventListener('input', function() {
+            if (paginationCtrlElement) paginationCtrlElement.dataset.currentPage = 1;
+            window.fetchBorrowersGlobal();
+        });
+    }
+    
+    if (paginationCtrlElement) paginationCtrlElement.dataset.currentPage = 1;
+    window.fetchBorrowersGlobal(); // Барак жүктөлгөндө карыз алуучуларды жүктөө
+});
+
+// deleteBorrower функциясын бул жерге кошуу керек, эгер өчүрүү баскычын активдештирсеңиз
+/*
+window.deleteBorrower = function(borrowerId, borrowerName) {
+    if (confirm(`"${borrowerName}" аттуу карыз алуучуну өчүргүңүз келеби?`)) {
+        fetch(`/api-v1/borrowers/${borrowerId}/`, { // API endpoint'иңизди текшериңиз
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': csrftoken } // csrftoken base.html'ден келет
+        })
+        .then(response => {
+            if (response.ok) {
+                alert('Карыз алуучу ийгиликтүү өчүрүлдү.');
+                window.fetchBorrowersGlobal(); // Тизмени жаңыртуу
+            } else {
+                response.json().then(data => {
+                    let errorMsg = 'Карыз алуучуну өчүрүүдө ката кетти.';
+                    // DRF каталарын толук көрсөтүү
+                    if (data) {
+                        for (const key in data) {
+                            errorMsg += ` ${key}: ${Array.isArray(data[key]) ? data[key].join(', ') : data[key]}`;
+                        }
+                    }
+                    alert(errorMsg);
+                }).catch(() => alert('Карыз алуучуну өчүрүүдө ката кетти.'));
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting borrower:', error);
+            alert('Карыз алуучуну өчүрүүдө ката кетти.');
+        });
+    }
+}
+*/
+</script>
+{% endblock %}

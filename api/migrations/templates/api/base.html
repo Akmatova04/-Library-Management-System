@@ -1,0 +1,54 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ky">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Китепкана Системасы{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'api/css/style.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <header>
+        <h1>Китепкананы Башкаруу Системасы</h1>
+    </header>
+    <nav>
+        <ul>
+            <li><a href="{% url 'page_book_list' %}">Китептер</a></li>
+            <li><a href="{% url 'page_add_book' %}">Китеп Кошуу</a></li>
+            <li><a href="{% url 'page_borrowers_list' %}">Карыз Алуучулар</a></li>
+            <li><a href="{% url 'page_loan_list' %}">Берилген Китептер</a></li>
+            <!-- Башка шилтемелер -->
+        </ul>
+    </nav>
+    <div class="container">
+        {% block content %}
+        {% endblock %}
+    </div>
+
+    <footer>
+        <p style="text-align:center; margin-top: 30px; color: #6c757d;">
+            © {% now "Y" %} Китепкана Долбоору.
+        </p>
+    </footer>
+    <script>
+        // CSRF токенди AJAX сурамдары үчүн алуу
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        const csrftoken = getCookie('csrftoken');
+    </script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,193 @@
+{% extends "api/base.html" %}
+{% load static %}
+
+{% block title %}{% if form_title %}{{ form_title }}{% else %}Китеп Формасы{% endif %}{% endblock %}
+
+{% block content %}
+<h2 id="formTitleH2">{% if form_title %}{{ form_title }}{% else %}Китеп Формасы{% endif %}</h2>
+
+<form id="bookForm">
+    {% csrf_token %} {# Бул Django Templates үчүн, бирок биз API'ге жөнөтөбүз, андыктан JS'те керек #}
+    <input type="hidden" id="bookId" name="book_id">
+
+    <div class="form-group">
+        <label for="title">Аталышы:</label>
+        <input type="text" id="title" name="title" required>
+    </div>
+    <div class="form-group">
+        <label for="author">Автору:</label>
+        <input type="text" id="author" name="author" required>
+    </div>
+    <div class="form-group">
+        <label for="isbn">ISBN:</label>
+        <input type="text" id="isbn" name="isbn" required>
+    </div>
+    <div class="form-group">
+        <label for="year_published">Басылган жылы:</label>
+        <input type="number" id="year_published" name="year_published">
+    </div>
+    <div class="form-group">
+        <label for="quantity_total">Жалпы саны:</label>
+        <input type="number" id="quantity_total" name="quantity_total" required min="0">
+    </div>
+    <div class="form-group">
+        <label for="genre">Жанры:</label>
+        <input type="text" id="genre" name="genre">
+    </div>
+    <div class="form-group">
+        <label for="image_cover">Китептин сүрөтү (милдеттүү эмес):</label>
+        <input type="file" id="image_cover" name="image_cover" accept="image/*">
+        <img id="imagePreview" src="#" alt="Сүрөт алдын ала көрүү" style="max-width: 150px; max-height: 200px; margin-top: 10px; display: none;"/>
+    </div>
+    <button type="submit" id="submitButton">Сактоо</button>
+</form>
+<div id="formMessage" style="margin-top:15px;"></div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const bookForm = document.getElementById('bookForm');
+    const formMessage = document.getElementById('formMessage');
+    const bookIdField = document.getElementById('bookId');
+    const imageCoverField = document.getElementById('image_cover');
+    const imagePreview = document.getElementById('imagePreview');
+    const formTitleH2 = document.getElementById('formTitleH2');
+    const submitButton = document.getElementById('submitButton');
+
+    // Сүрөт тандалганда алдын ала көрсөтүү
+    imageCoverField.addEventListener('change', function(event) {
+        if (event.target.files && event.target.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+            }
+            reader.readAsDataURL(event.target.files[0]);
+        } else {
+            imagePreview.style.display = 'none';
+        }
+    });
+
+    // URL'ден book_id алуу (оңдоо режими үчүн)
+    const pathArray = window.location.pathname.split('/');
+    const editMode = pathArray.includes('edit');
+    let currentBookId = null;
+
+    if (editMode) {
+        currentBookId = pathArray[pathArray.indexOf('edit') + 1];
+        if (currentBookId && !isNaN(parseInt(currentBookId))) {
+            bookIdField.value = currentBookId;
+            formTitleH2.textContent = 'Китепти Оңдоо';
+            submitButton.textContent = 'Жаңыртуу';
+            // Маалыматтарды API'ден жүктөө
+            fetch(`/api/books/${currentBookId}/`)
+                .then(response => response.json())
+                .then(book => {
+                    document.getElementById('title').value = book.title;
+                    document.getElementById('author').value = book.author;
+                    document.getElementById('isbn').value = book.isbn;
+                    document.getElementById('year_published').value = book.year_published || '';
+                    document.getElementById('quantity_total').value = book.quantity_total;
+                    // quantity_available бул жерде көрсөтүлбөйт, себеби ал DRF'те read_only
+                    document.getElementById('genre').value = book.genre || '';
+                    if (book.image_cover_url) {
+                        imagePreview.src = book.image_cover_url;
+                        imagePreview.style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching book details:', error);
+                    formMessage.textContent = 'Китеп маалыматын жүктөөдө ката: ' + error;
+                    formMessage.style.color = 'red';
+                });
+        } else {
+             formTitleH2.textContent = 'Жаңы Китеп Кошуу';
+             submitButton.textContent = 'Сактоо';
+        }
+    } else {
+        formTitleH2.textContent = 'Жаңы Китеп Кошуу';
+        submitButton.textContent = 'Сактоо';
+    }
+
+
+    bookForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        formMessage.textContent = 'Жөнөтүлүүдө...';
+        formMessage.style.color = 'blue';
+
+        const formData = new FormData();
+        formData.append('title', document.getElementById('title').value);
+        formData.append('author', document.getElementById('author').value);
+        formData.append('isbn', document.getElementById('isbn').value);
+        
+        const yearPublished = document.getElementById('year_published').value;
+        if (yearPublished) formData.append('year_published', yearPublished);
+        
+        formData.append('quantity_total', document.getElementById('quantity_total').value);
+        
+        const genre = document.getElementById('genre').value;
+        if (genre) formData.append('genre', genre);
+        
+        if (imageCoverField.files[0]) {
+            formData.append('image_cover', imageCoverField.files[0]);
+        }
+
+        let url = '/api/books/';
+        let method = 'POST';
+
+        if (currentBookId) { // Оңдоо режими
+            url = `/api/books/${currentBookId}/`;
+            method = 'PUT'; // Же PATCH, эгер жарым-жартылай жаңыртуу болсо
+            // Эгер сүрөт тандалбаса, аны formData'дан алып салуу керек,
+            // болбосо DRF аны null катары кабыл алып, эски сүрөттү өчүрүшү мүмкүн.
+            // Бирок, эгер сүрөт талаасы жөнөтүлбөсө, DRF аны өзгөртпөйт.
+            // Эгерде колдонуучу сүрөттү так өчүргүсү келсе, бул үчүн өзүнчө логика керек.
+        }
+
+        fetch(url, {
+            method: method,
+            headers: {
+                'X-CSRFToken': csrftoken // Django'нун CSRF токени (эгер сессия аутентификациясы болсо)
+                // 'Content-Type': 'application/json' -> FormData үчүн бул кереги жок, браузер өзү коет
+            },
+            body: formData // JSON эмес, FormData!
+        })
+        .then(response => {
+            if (!response.ok) {
+                // Катанын текстин алууга аракет кылуу
+                return response.json().then(errData => {
+                    throw { status: response.status, data: errData };
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            formMessage.textContent = currentBookId ? 'Китеп ийгиликтүү жаңыртылды!' : 'Китеп ийгиликтүү кошулду!';
+            formMessage.style.color = 'green';
+            // bookForm.reset(); // Форманы тазалоо (жаңы китеп кошууда)
+            // imagePreview.style.display = 'none';
+            // Эгер ийгиликтүү болсо, китептердин тизмесине кайтуу
+            setTimeout(() => {
+                window.location.href = "{% url 'page_book_list' %}"; // Django URL теги
+            }, 1500);
+        })
+        .catch(errorObj => {
+            console.error('Error submitting form:', errorObj);
+            let errorMessageText = currentBookId ? 'Китепти жаңыртууда ката кетти.' : 'Китепти кошууда ката кетти.';
+            if (errorObj && errorObj.data) {
+                // DRF каталарын көрсөтүү
+                for (const key in errorObj.data) {
+                    errorMessageText += ` ${key}: ${errorObj.data[key].join ? errorObj.data[key].join(', ') : errorObj.data[key]}`;
+                }
+            } else if (errorObj && errorObj.message) {
+                 errorMessageText += ` ${errorObj.message}`;
+            }
+            formMessage.textContent = errorMessageText;
+            formMessage.style.color = 'red';
+        });
+    });
+});
+</script>
+{% endblock %}

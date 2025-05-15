@@ -1,0 +1,184 @@
+{% extends "api/base.html" %}
+{% load static %}
+
+{% block title %}{% if form_title %}{{ form_title }}{% else %}Китеп Формасы{% endif %}{% endblock %}
+
+{% block content %}
+<h2 id="formTitleH2">{% if form_title %}{{ form_title }}{% else %}Китеп Формасы{% endif %}</h2>
+
+<form id="bookForm">
+    {# {% csrf_token %} Бул Django формасы эмес, API'ге жөнөтүлөт, JS'те X-CSRFToken колдонобуз #}
+    <input type="hidden" id="bookIdField" name="book_id_field"> {# name атрибуту submit үчүн керек болушу мүмкүн, бирок биз FormData менен колдонобуз #}
+
+    <div class="form-group">
+        <label for="titleField">Аталышы:</label> {# ID'лерди уникалдуу кылуу үчүн "Field" коштум #}
+        <input type="text" id="titleField" name="title" required>
+    </div>
+    <div class="form-group">
+        <label for="authorField">Автору:</label>
+        <input type="text" id="authorField" name="author" required>
+    </div>
+    <div class="form-group">
+        <label for="isbnField">ISBN:</label>
+        <input type="text" id="isbnField" name="isbn" required>
+    </div>
+    <div class="form-group">
+        <label for="yearPublishedField">Басылган жылы:</label>
+        <input type="number" id="yearPublishedField" name="year_published">
+    </div>
+    <div class="form-group">
+        <label for="quantityTotalField">Жалпы саны:</label>
+        <input type="number" id="quantityTotalField" name="quantity_total" required min="0">
+    </div>
+    <div class="form-group">
+        <label for="genreField">Жанры:</label>
+        <input type="text" id="genreField" name="genre">
+    </div>
+    <div class="form-group">
+        <label for="imageCoverField">Китептин сүрөтү (милдеттүү эмес):</label>
+        <input type="file" id="imageCoverField" name="image_cover" accept="image/*">
+        <img id="imagePreview" src="#" alt="Сүрөт алдын ала көрүү" style="max-width: 150px; max-height: 200px; margin-top: 10px; display: none;"/>
+    </div>
+    <button type="submit" id="submitButton">Сактоо</button>
+</form>
+<div id="formMessage" style="margin-top:15px;"></div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const bookForm = document.getElementById('bookForm');
+    const formMessage = document.getElementById('formMessage');
+    const bookIdInput = document.getElementById('bookIdField'); // ID'ни оңдодум
+    const imageCoverInput = document.getElementById('imageCoverField'); // ID'ни оңдодум
+    const imagePreview = document.getElementById('imagePreview');
+    const formTitleH2 = document.getElementById('formTitleH2');
+    const submitButton = document.getElementById('submitButton');
+
+    // Форма талааларын алуу үчүн ID'лерди колдонобуз
+    const titleInput = document.getElementById('titleField');
+    const authorInput = document.getElementById('authorField');
+    const isbnInput = document.getElementById('isbnField');
+    const yearPublishedInput = document.getElementById('yearPublishedField');
+    const quantityTotalInput = document.getElementById('quantityTotalField');
+    const genreInput = document.getElementById('genreField');
+
+
+    imageCoverInput.addEventListener('change', function(event) {
+        if (event.target.files && event.target.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+            }
+            reader.readAsDataURL(event.target.files[0]);
+        } else {
+            imagePreview.style.display = 'none';
+        }
+    });
+
+    const pathArray = window.location.pathname.split('/');
+    const editMode = pathArray.includes('edit');
+    let currentBookId = null;
+
+    if (editMode) {
+        currentBookId = pathArray[pathArray.indexOf('edit') + 1];
+        if (currentBookId && !isNaN(parseInt(currentBookId))) {
+            bookIdInput.value = currentBookId; // Жашыруун талаага ID'ни коёбуз
+            formTitleH2.textContent = 'Китепти Оңдоо';
+            submitButton.textContent = 'Жаңыртуу';
+            
+            fetch(`/api-v1/books/${currentBookId}/`) // API endpoint'иңизге тууралаңыз
+                .then(response => response.json())
+                .then(book => {
+                    titleInput.value = book.title;
+                    authorInput.value = book.author;
+                    isbnInput.value = book.isbn;
+                    yearPublishedInput.value = book.year_published || '';
+                    quantityTotalInput.value = book.quantity_total;
+                    genreInput.value = book.genre || '';
+                    if (book.image_cover_url) {
+                        imagePreview.src = book.image_cover_url;
+                        imagePreview.style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching book details:', error);
+                    formMessage.textContent = 'Китеп маалыматын жүктөөдө ката: ' + error;
+                    formMessage.style.color = 'red';
+                });
+        } else {
+             formTitleH2.textContent = 'Жаңы Китеп Кошуу';
+             submitButton.textContent = 'Сактоо';
+        }
+    } else {
+        formTitleH2.textContent = 'Жаңы Китеп Кошуу';
+        submitButton.textContent = 'Сактоо';
+    }
+
+    bookForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        formMessage.textContent = 'Жөнөтүлүүдө...';
+        formMessage.style.color = 'blue';
+
+        const formData = new FormData();
+        formData.append('title', titleInput.value);
+        formData.append('author', authorInput.value);
+        formData.append('isbn', isbnInput.value);
+        
+        if (yearPublishedInput.value) formData.append('year_published', yearPublishedInput.value);
+        formData.append('quantity_total', quantityTotalInput.value);
+        if (genreInput.value) formData.append('genre', genreInput.value);
+        
+        if (imageCoverInput.files[0]) {
+            formData.append('image_cover', imageCoverInput.files[0]);
+        }
+
+        let url = '/api-v1/books/'; // API endpoint'иңизге тууралаңыз
+        let method = 'POST';
+
+        if (currentBookId) {
+            url = `/api-v1/books/${currentBookId}/`; // API endpoint'иңизге тууралаңыз
+            method = 'PUT'; 
+        }
+
+        fetch(url, {
+            method: method,
+            headers: {
+                'X-CSRFToken': csrftoken 
+            },
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw { status: response.status, data: errData };
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            formMessage.textContent = currentBookId ? 'Китеп ийгиликтүү жаңыртылды!' : 'Китеп ийгиликтүү кошулду!';
+            formMessage.style.color = 'green';
+            setTimeout(() => {
+                window.location.href = "{% url 'page_book_list' %}";
+            }, 1500);
+        })
+        .catch(errorObj => {
+            console.error('Error submitting form:', errorObj);
+            let errorMessageText = currentBookId ? 'Китепти жаңыртууда ката кетти.' : 'Китепти кошууда ката кетти.';
+            if (errorObj && errorObj.data) {
+                for (const key in errorObj.data) {
+                    errorMessageText += ` ${key}: ${errorObj.data[key].join ? errorObj.data[key].join(', ') : errorObj.data[key]}`;
+                }
+            } else if (errorObj && errorObj.message) {
+                 errorMessageText += ` ${errorObj.message}`;
+            }
+            formMessage.textContent = errorMessageText;
+            formMessage.style.color = 'red';
+        });
+    });
+});
+</script>
+{% endblock %}

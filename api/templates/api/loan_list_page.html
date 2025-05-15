@@ -1,0 +1,245 @@
+{% extends "api/base.html" %}
+{% load static %}
+
+{% block title %}Берилген Китептер{% endblock %}
+
+{% block content %}
+<h2>Берилген Китептердин Тизмеси</h2>
+
+<div class="form-group">
+    <label for="loanSearchInput">Издөө (китептин аталышы, ISBN, карыз алуучунун аты, ID):</label>
+    <input type="text" id="loanSearchInput" placeholder="Издөө...">
+</div>
+
+<div class="form-group">
+    <label for="loanStatusFilter">Статус боюнча чыпкалоо:</label>
+    <select id="loanStatusFilter">
+        <option value="">Баары</option>
+        <option value="active">Активдүү (кайтарыла элек)</option>
+        <option value="overdue">Мөөнөтү өткөн</option>
+        <option value="returned">Кайтарылган</option>
+    </select>
+</div>
+
+{# Бул жерге "Жаңы китеп берүү" баскычын/шилтемесин кошсоңуз болот #}
+{# Мисалы: <a href="{% url 'page_add_loan' %}" class="btn" style="margin-bottom: 15px;">Жаңы Китеп Берүү</a> #}
+
+
+<div id="loadingLoansMessage">Маалыматтар жүктөлүүдө...</div>
+<div id="errorLoansMessage" style="display:none;"></div>
+<ul id="loanListUL" class="book-list"> {# Окшош стиль үчүн book-list классын колдонобуз #}
+    <!-- Китеп берүү жазуулары бул жерге JavaScript аркылуу жайгаштырылат -->
+</ul>
+<div id="loanPaginationControls" style="text-align: center; margin-top: 20px;">
+    <!-- Пагинация баскычтары -->
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Бул функцияны глобалдык scope'ко чыгарабыз
+window.fetchLoansGlobal = function() {
+    const loanListULElement = document.getElementById('loanListUL');
+    const loadingMsgElement = document.getElementById('loadingLoansMessage');
+    const errorMsgElement = document.getElementById('errorLoansMessage');
+    const searchInputElement = document.getElementById('loanSearchInput');
+    const statusFilterElement = document.getElementById('loanStatusFilter');
+    const paginationCtrlElement = document.getElementById('loanPaginationControls');
+
+    let currentPage = parseInt(paginationCtrlElement.dataset.currentPage) || 1;
+    let currentSearchQuery = searchInputElement ? searchInputElement.value : '';
+    let currentStatusFilter = statusFilterElement ? statusFilterElement.value : '';
+
+    loadingMsgElement.style.display = 'block';
+    loanListULElement.innerHTML = '';
+    errorMsgElement.style.display = 'none';
+
+    let apiUrl = `/api-v1/loans/?page=${currentPage}`; // API endpoint'иңизди текшериңиз
+
+    if (currentSearchQuery) {
+        apiUrl += `&search=${encodeURIComponent(currentSearchQuery)}`;
+    }
+
+    if (currentStatusFilter) {
+        if (currentStatusFilter === "active") {
+            apiUrl += `&return_date__isnull=true`; // Кайтарыла электер
+            // Мөөнөтү өткөндөрдү чыгарбоо үчүн кошумча шарт (эгер API'де overdue өзүнчө болбосо)
+            // Бул үчүн API'нин is_overdue property'син колдонуу кыйын болот,
+            // ошондуктан due_date боюнча фильтрлөө керек болушу мүмкүн.
+            // Азырынча, жөн гана активдүүлөр.
+        } else if (currentStatusFilter === "overdue") {
+            apiUrl += `&return_date__isnull=true&due_date__lt=${new Date().toISOString().split('T')[0]}`; // Мөөнөтү өткөндөр
+        } else if (currentStatusFilter === "returned") {
+            apiUrl += `&return_date__isnull=false`; // Кайтарылгандар
+        }
+    }
+
+
+    fetch(apiUrl)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            displayLoans(data, loanListULElement, loadingMsgElement, errorMsgElement, paginationCtrlElement, currentPage);
+        })
+        .catch(error => {
+            console.error('Error fetching loans:', error);
+            loadingMsgElement.style.display = 'none';
+            errorMsgElement.textContent = 'Китеп берүү жазууларын жүктөөдө ката кетти: ' + error.message;
+            errorMsgElement.style.display = 'block';
+        });
+}
+
+function displayLoans(loansData, listUlElem, loadingElem, errorElem, paginationElem, currentPageNum) {
+    loadingElem.style.display = 'none';
+    listUlElem.innerHTML = '';
+    errorElem.style.display = 'none';
+
+    if (!loansData || !loansData.results || loansData.results.length === 0) {
+        listUlElem.innerHTML = '<li>Китеп берүү жазуулары табылган жок.</li>';
+        paginationElem.innerHTML = '';
+        return;
+    }
+
+    loansData.results.forEach(loan => {
+        const li = document.createElement('li');
+        li.classList.add('book-item');
+        
+        let loanStatus = '';
+        let statusColor = 'inherit';
+        if (loan.return_date) {
+            loanStatus = `Кайтарылган: ${new Date(loan.return_date).toLocaleDateString()}`;
+            statusColor = 'green';
+        } else if (loan.is_overdue) {
+            loanStatus = 'МӨӨНӨТҮ ӨТКӨН!';
+            statusColor = 'red';
+        } else {
+            loanStatus = 'Активдүү';
+            statusColor = 'orange';
+        }
+
+        li.innerHTML = `
+            <div class="book-details">
+                <div class="title">Китеп: ${loan.book ? loan.book.title : 'Белгисиз китеп'} (ISBN: ${loan.book ? loan.book.isbn : 'N/A'})</div>
+                <div class="author">Карыз алуучу: ${loan.borrower ? loan.borrower.name : 'Белгисиз карыз алуучу'} (ID: ${loan.borrower ? loan.borrower.user_id : 'N/A'})</div>
+                <div class="isbn">Берилген күнү: ${new Date(loan.loan_date).toLocaleDateString()}</div>
+                <div class="genre">Кайтаруу мөөнөтү: ${new Date(loan.due_date).toLocaleDateString()}</div>
+                <div style="color: ${statusColor}; font-weight: bold;">Статусу: ${loanStatus}</div>
+                <div style="margin-top: 10px;">
+                    ${!loan.return_date ? `<button class="btn" onclick="markAsReturned('${loan.id}', '${loan.book ? loan.book.title.replace(/'/g, "\\'") : ''}')">Кайтарылды деп белгилөө</button>` : ''}
+                    {# Оңдоо (мисалы, мөөнөтүн өзгөртүү) жана өчүрүү үчүн шилтемелер/баскычтар #}
+                    {# <a href="/app/loans/edit/${loan.id}/" class="btn btn-edit">Оңдоо</a> #}
+                </div>
+            </div>
+        `;
+        listUlElem.appendChild(li);
+    });
+    
+    renderLoanPagination(loansData.count, loansData.next, loansData.previous, paginationElem, currentPageNum);
+}
+
+function renderLoanPagination(totalItems, nextPageUrl, prevPageUrl, paginationElem, currentPageNum) {
+    paginationElem.innerHTML = '';
+    paginationElem.dataset.currentPage = currentPageNum;
+
+    const itemsPerPage = 10; // Сиздин DRF PAGE_SIZE менен бирдей болушу керек
+    const totalPages = Math.ceil(totalItems / itemsPerPage);
+
+    if (totalPages <= 1) return;
+
+    if (prevPageUrl) {
+        const prevButton = document.createElement('button');
+        prevButton.textContent = '<< Мурунку';
+        prevButton.classList.add('btn');
+        prevButton.addEventListener('click', () => {
+            paginationElem.dataset.currentPage = parseInt(currentPageNum) - 1;
+            window.fetchLoansGlobal();
+        });
+        paginationElem.appendChild(prevButton);
+    }
+    
+    const pageInfo = document.createElement('span');
+    pageInfo.textContent = ` Бет ${currentPageNum} / ${totalPages} `;
+    pageInfo.style.margin = "0 10px";
+    paginationElem.appendChild(pageInfo);
+
+    if (nextPageUrl) {
+        const nextButton = document.createElement('button');
+        nextButton.textContent = 'Кийинки >>';
+        nextButton.classList.add('btn');
+        nextButton.addEventListener('click', () => {
+            paginationElem.dataset.currentPage = parseInt(currentPageNum) + 1;
+            window.fetchLoansGlobal();
+        });
+        paginationElem.appendChild(nextButton);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInputElement = document.getElementById('loanSearchInput');
+    const statusFilterElement = document.getElementById('loanStatusFilter');
+    const paginationCtrlElement = document.getElementById('loanPaginationControls');
+
+    if (searchInputElement) {
+        searchInputElement.addEventListener('input', function() {
+            if (paginationCtrlElement) paginationCtrlElement.dataset.currentPage = 1;
+            window.fetchLoansGlobal();
+        });
+    }
+    if (statusFilterElement) {
+        statusFilterElement.addEventListener('change', function() {
+            if (paginationCtrlElement) paginationCtrlElement.dataset.currentPage = 1;
+            window.fetchLoansGlobal();
+        });
+    }
+    
+    if (paginationCtrlElement) paginationCtrlElement.dataset.currentPage = 1;
+    window.fetchLoansGlobal(); // Барак жүктөлгөндө жазууларды жүктөө
+});
+
+window.markAsReturned = function(loanId, bookTitle) {
+    if (confirm(`"${bookTitle}" китебин кайтарылды деп белгилейсизби?`)) {
+        // Бул жерде LoanRecordViewSet'теги 'return-book' action'ын чакырсак болот,
+        // бирок ал ISBN жана user_id алат. Же болбосо, loan record'ду ID боюнча жаңыртуу үчүн
+        // стандарттуу PUT/PATCH сурамын жөнөтөбүз.
+        
+        const returnDate = new Date().toISOString().split('T')[0]; // Бүгүнкү күн
+
+        fetch(`/api-v1/loans/${loanId}/`, { // API endpoint'иңизди текшериңиз
+            method: 'PATCH', // Же PUT, эгер бардык талааларды жөнөтсөңүз
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken // csrftoken base.html'ден келет
+            },
+            body: JSON.stringify({
+                return_date: returnDate
+            })
+        })
+        .then(response => {
+            if (response.ok) {
+                alert('Китеп кайтарылды деп ийгиликтүү белгиленди.');
+                window.fetchLoansGlobal(); // Тизмени жаңыртуу
+            } else {
+                response.json().then(data => {
+                    let errorMsg = 'Китепти кайтарылды деп белгилөөдө ката кетти.';
+                     if (data) {
+                        for (const key in data) {
+                            errorMsg += ` ${key}: ${Array.isArray(data[key]) ? data[key].join(', ') : data[key]}`;
+                        }
+                    }
+                    alert(errorMsg);
+                }).catch(() => alert('Китепти кайтарылды деп белгилөөдө ката кетти.'));
+            }
+        })
+        .catch(error => {
+            console.error('Error marking book as returned:', error);
+            alert('Китепти кайтарылды деп белгилөөдө ката кетти.');
+        });
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,238 @@
+{% extends "api/base.html" %}
+{% load static %}
+
+{% block title %}Китептердин Тизмеси{% endblock %}
+
+{% block content %}
+<h2>Китептердин Тизмеси</h2>
+
+<div class="form-group">
+    <label for="searchInput">Издөө (аталышы, автору, ISBN):</label>
+    <input type="text" id="searchInput" placeholder="Издөө...">
+</div>
+
+<div id="loadingMessage">Маалыматтар жүктөлүүдө...</div>
+<div id="errorMessage" style="display:none;"></div>
+<ul id="bookList" class="book-list">
+    <!-- Китептер бул жерге JavaScript аркылуу жайгаштырылат -->
+</ul>
+<div id="paginationControls" style="text-align: center; margin-top: 20px;">
+    <!-- Пагинация баскычтары -->
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const bookListUL = document.getElementById('bookList');
+    const loadingMessage = document.getElementById('loadingMessage');
+    const errorMessage = document.getElementById('errorMessage');
+    const searchInput = document.getElementById('searchInput');
+    const paginationControls = document.getElementById('paginationControls');
+    let currentPage = 1;
+    let currentSearchQuery = '';
+
+    function displayBooks(booksData) {
+        loadingMessage.style.display = 'none';
+        bookListUL.innerHTML = '';
+        errorMessage.style.display = 'none';
+
+        if (!booksData || !booksData.results || booksData.results.length === 0) {
+            bookListUL.innerHTML = '<li>Китептер табылган жок.</li>';
+            paginationControls.innerHTML = ''; // Пагинацияны тазалоо
+            return;
+        }
+
+        booksData.results.forEach(book => {
+            const li = document.createElement('li');
+            li.classList.add('book-item');
+            let imgHtml = '';
+            if (book.image_cover_url) {
+                // Эгерде URL толук болбосо (мисалы, /media/...), сайттын доменин кошуу керек
+                // Бирок DRF ImageField'ди туура сериализацияласа, толук URL бериши керек
+                imgHtml = `<img src="${book.image_cover_url}" alt="${book.title}" class="book-cover">`;
+            } else {
+                imgHtml = `<div class="book-cover" style="width:100px; height:150px; background:#eee; text-align:center; line-height:150px; font-size:0.8em; color:#aaa; margin-right:15px;">Сүрөт жок</div>`;
+            }
+
+            li.innerHTML = `
+                ${imgHtml}
+                <div class="book-details">
+                    <div class="title">${book.title}</div>
+                    <div class="author">Автору: ${book.author}</div>
+                    <div class="isbn">ISBN: ${book.isbn}</div>
+                    <div class="genre">Жанры: ${book.genre || 'Белгисиз'}</div>
+                    <div class="quantity">Жалпы: ${book.quantity_total}, Жеткиликтүү: ${book.quantity_available}</div>
+                    <div style="margin-top: 10px;">
+                        <a href="/api/app/books/edit/${book.id}/" class="btn btn-edit">Оңдоо</a>
+                        <button class="btn btn-danger" onclick="deleteBook(${book.id}, '${book.title.replace(/'/g, "\\'")}')">Өчүрүү</button>
+                    </div>
+                </div>
+            `;
+            bookListUL.appendChild(li);
+        });
+        
+        // Пагинацияны көрсөтүү
+        renderPagination(booksData.count, booksData.next, booksData.previous);
+    }
+
+    function renderPagination(totalItems, nextPageUrl, prevPageUrl) {
+        paginationControls.innerHTML = '';
+        const itemsPerPage = 10; // settings.py'дагы PAGE_SIZE менен дал келиши керек
+        const totalPages = Math.ceil(totalItems / itemsPerPage);
+
+        if (totalPages <= 1) return;
+
+        if (prevPageUrl) {
+            const prevButton = document.createElement('button');
+            prevButton.textContent = '<< Мурунку';
+            prevButton.classList.add('btn');
+            prevButton.addEventListener('click', () => {
+                currentPage--;
+                fetchBooks();
+            });
+            paginationControls.appendChild(prevButton);
+        }
+        
+        const pageInfo = document.createElement('span');
+        pageInfo.textContent = ` Бет ${currentPage} / ${totalPages} `;
+        pageInfo.style.margin = "0 10px";
+        paginationControls.appendChild(pageInfo);
+
+        if (nextPageUrl) {
+            const nextButton = document.createElement('button');
+            nextButton.textContent = 'Кийинки >>';
+            nextButton.classList.add('btn');
+            nextButton.addEventListener('click', () => {
+                currentPage++;
+                fetchBooks();
+            });
+            paginationControls.appendChild(nextButton);
+        }
+    }
+
+
+    function fetchBooks() {
+        loadingMessage.style.display = 'block';
+        bookListUL.innerHTML = '';
+        errorMessage.style.display = 'none';
+        paginationControls.innerHTML = '';
+
+
+        let url = `/api/books/?page=${currentPage}`;
+        if (currentSearchQuery) {
+            url += `&search=${encodeURIComponent(currentSearchQuery)}`;
+        }
+
+        fetch(url)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                displayBooks(data);
+            })
+            .catch(error => {
+                console.error('Error fetching books:', error);
+                loadingMessage.style.display = 'none';
+                errorMessage.textContent = 'Китептерди жүктөөдө ката кетти: ' + error.message;
+                errorMessage.style.display = 'block';
+            });
+    }
+
+    searchInput.addEventListener('input', function() {
+        currentSearchQuery = this.value;
+        currentPage = 1; // Издөөдө биринчи бетке кайтуу
+        fetchBooks();
+    });
+
+    // Баштапкы жүктөө
+    fetchBooks();
+});
+
+// Глобалдык функция, анткени ал inline onclick'те чакырылат
+window.deleteBook = function(bookId, bookTitle) {
+    if (confirm(`"${bookTitle}" китебин чын эле өчүргүңүз келеби?`)) {
+        fetch(`/api/books/${bookId}/`, {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': csrftoken // Жогоруда аныкталган CSRF токен
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                alert('Китеп ийгиликтүү өчүрүлдү.');
+                // Тизмени жаңыртуу үчүн fetchBooks() чакыруу
+                // Же болбосо, DOM'дон элементти түз өчүрүү
+                const itemToRemove = Array.from(document.querySelectorAll('#bookList li')).find(li => li.innerHTML.includes(`deleteBook(${bookId}`));
+                if (itemToRemove) itemToRemove.remove();
+                // Эгер акыркы элемент өчүрүлсө, тизмени толук жаңыртуу жакшыраак
+                if (document.querySelectorAll('#bookList li').length === 0 && currentPage > 1) {
+                     currentPage--; // Мурунку бетке өтүү
+                }
+                // Жакшыраак вариант: fetchBooks() кайра чакыруу
+                // Бул үчүн currentPage ж.б. туура коюлушу керек
+                // Азырынча жөнөкөй reload (бирок бул оптималдуу эмес)
+                // location.reload(); 
+                // Же атайын fetchBooks() кайра чакыруу
+                document.dispatchEvent(new CustomEvent('booksUpdated')); // Иш-чараны жаратуу
+            } else {
+                response.json().then(data => {
+                    let errorMsg = 'Китепти өчүрүүдө ката кетти.';
+                    if (data && data.detail) {
+                        errorMsg += ` Себеби: ${data.detail}`;
+                    } else if (data) {
+                        errorMsg += ` Себеби: ${JSON.stringify(data)}`;
+                    }
+                    alert(errorMsg);
+                }).catch(() => alert('Китепти өчүрүүдө ката кетти.'));
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting book:', error);
+            alert('Китепти өчүрүүдө ката кетти.');
+        });
+    }
+}
+// Тизмени жаңыртуу үчүн иш-чараны угуучу
+document.addEventListener('booksUpdated', function() {
+    // Глобалдык fetchBooks функциясы жок болгондуктан, бул жерде кайра аныктайбыз же
+    // DOMContentLoaded ичиндеги fetchBooks функциясын глобалдык кылабыз.
+    // Азырынча жөнөкөйлүк үчүн, баракты кайра жүктөбөй, DOMContentLoaded ичиндеги
+    // fetchBooks() функциясын чакырууга аракет кылалы (бирок бул түз иштебеши мүмкүн).
+    // Эң жакшысы, fetchBooks() функциясын DOMContentLoaded сыртына чыгаруу.
+    // Убактылуу чечим:
+    const searchInputForUpdate = document.getElementById('searchInput');
+    let currentSearchQueryForUpdate = searchInputForUpdate ? searchInputForUpdate.value : '';
+    let currentPageForUpdate = 1; // Же учурдагы бетти сактап калуу логикасы
+    
+    // fetchBooks() функциясын кайра чакыруунун ордуна, окшош логиканы бул жерде иштетүү
+    // же fetchBooks() ну глобалдык кылуу.
+    // Азырынча, эң жөнөкөй чечим:
+    if (typeof window.fetchBooksGlobal === 'function') { // Эгер fetchBooks глобалдык болсо
+        window.fetchBooksGlobal();
+    } else {
+        // Же болбосо, DOMContentLoaded ичиндеги fetchBooks'ту чакыра албайбыз,
+        // анткени ал локалдык scope'то.
+        // Эң жөнөкөй, бирок оптималдуу эмес жол:
+        // location.reload(); // Бул дайыма эле жакшы эмес
+        // Же болбосо, тизмени тазалап, кайрадан fetchBooks() чакыруу.
+        // Бул үчүн fetchBooks() ну глобалдык кылуу керек.
+        // Азырынча бул жерди бош калтыралы, же жөн гана тизмени тазалайлы.
+        // document.getElementById('bookList').innerHTML = '<p>Тизме жаңыртылууда...</p>';
+        // Андан кийин fetchBooks() логикасын кайталоо.
+        // Бул жерде booksUpdated иш-чарасы үлгү катары гана.
+        console.log("Books list might need a manual refresh or a global fetch function call.");
+    }
+});
+
+// fetchBooks() функциясын глобалдык кылуу үчүн:
+// DOMContentLoaded сыртына чыгарып:
+// window.fetchBooksGlobal = function() { /* ... fetchBooks логикасы ... */ }
+// Андан кийин DOMContentLoaded ичинде: window.fetchBooksGlobal();
+// Жана booksUpdated иш-чарасында да: window.fetchBooksGlobal();
+</script>
+{% endblock %}
